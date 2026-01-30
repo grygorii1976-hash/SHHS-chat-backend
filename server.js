@@ -65,8 +65,8 @@ function extractLeadData(history) {
   
   const userMessages = history.filter(msg => msg.role === "user").map(msg => msg.content);
   
-  // Name pattern (firstname lastname)
-  const namePattern = /\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/;
+  // More flexible name pattern (case-insensitive, allows one or two words)
+const namePattern = /\b([A-Za-z]{2,})\s+([A-Za-z]{2,})\b/i;
   
   // Phone pattern (various formats)
   const phonePattern = /\b(\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\(\d{3}\)\s?\d{3}[-.\s]?\d{4})\b/;
@@ -175,8 +175,21 @@ function extractLeadData(history) {
 
 // Check if we have complete lead data
 function isLeadComplete(leadData) {
-  return leadData.name && leadData.phone && leadData.service && leadData.zip;
+  const hasName = leadData.name && leadData.name.trim().length > 0;
+  const hasPhone = leadData.phone && leadData.phone.length >= 10;
+  const hasService = leadData.service && leadData.service.trim().length > 0;
+  const hasZip = leadData.zip && leadData.zip.length === 5;
+  
+  console.log('🔍 Checking completeness:', {
+    hasName,
+    hasPhone,
+    hasService,
+    hasZip
+  });
+  
+  return hasName && hasPhone && hasService && hasZip;
 }
+
 
 // Send lead to n8n webhook
 async function sendLeadToN8n(leadData, conversationHistory) {
