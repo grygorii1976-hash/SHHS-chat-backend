@@ -289,7 +289,7 @@ Remember: You have the full conversation history - USE IT!`
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
+      model: "gpt-4o",
       messages: messages,
       temperature: 0.3,
       max_tokens: 200
