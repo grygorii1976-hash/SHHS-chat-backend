@@ -68,7 +68,6 @@ function extractLeadData(history) {
   const userMessages = history.filter(msg => msg.role === "user").map(msg => msg.content);
   
   // IMPROVED: More flexible name pattern (case-insensitive, allows various formats)
-  // Matches: "John Smith", "john smith", "JOHN SMITH", "John-Paul Smith"
   const namePattern = /\b([A-Za-z][\w'-]{1,})\s+([A-Za-z][\w'-]{1,})\b/i;
   
   // Phone pattern (various formats)
@@ -82,17 +81,20 @@ function extractLeadData(history) {
     'pressure', 'deck', 'door', 'window', 'fan', 'faucet', 'toilet', 'repair', 'install', 
     'fix', 'replace', 'remodel', 'renovation', 'construct', 'build', 'mount', 'hang', 'leak', 'knob'];
   
+  // Date keywords for extraction
+  const dateKeywords = ['today', 'tomorrow', 'weekend', 'week', 'monday', 'tuesday', 'wednesday', 
+    'thursday', 'friday', 'saturday', 'sunday', 'asap', 'soon', 'morning', 'afternoon', 'evening',
+    'next', 'this'];
+  
   for (const msg of userMessages) {
     // Extract name - IMPROVED: case-insensitive
     if (!leadData.name) {
       const nameMatch = msg.match(namePattern);
       if (nameMatch) {
-        // Only accept if it's NOT a service-related phrase
         const msgLower = msg.toLowerCase();
         const isServicePhrase = serviceKeywords.some(keyword => msgLower.includes(keyword));
         
         if (!isServicePhrase) {
-          // Capitalize properly: "john smith" → "John Smith"
           const firstName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
           const lastName = nameMatch[2].charAt(0).toUpperCase() + nameMatch[2].slice(1).toLowerCase();
           
@@ -120,13 +122,12 @@ function extractLeadData(history) {
       }
     }
     
-    // NEW: Extract city name if not already found
+    // Extract city name
     if (!leadData.city) {
       const cityPattern = /\b(Orlando|Kissimmee|Lakeland|Winter Park|Winter Garden|Clermont|St\.? Cloud|Saint Cloud|Apopka|Ocoee|Davenport|Haines City|Poinciana|Intercession City|Celebration|Windermere|Altamonte Springs|Sanford|Lake Mary|Maitland|Casselberry|Longwood|Cocoa|Melbourne|Titusville|Palm Bay|Rockledge)\b/i;
       const cityMatch = msg.match(cityPattern);
       if (cityMatch) {
         const cityName = cityMatch[1];
-        // Proper capitalization
         leadData.city = cityName.split(' ').map(word => 
           word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
         ).join(' ');
@@ -134,7 +135,6 @@ function extractLeadData(history) {
         if (!leadData.location) {
           leadData.location = leadData.city;
         }
-        // Assume in service area if they mention a city we serve
         leadData.inServiceArea = true;
       }
     }
@@ -149,6 +149,17 @@ function extractLeadData(history) {
         }
       }
     }
+    
+    // NEW: Extract preferred date
+    if (!leadData.preferredDate) {
+      const lowerMsg = msg.toLowerCase();
+      const hasDateKeyword = dateKeywords.some(keyword => lowerMsg.includes(keyword));
+      
+      // Only extract if message is short (likely a date response) and contains date keywords
+      if (hasDateKeyword && msg.length < 50) {
+        leadData.preferredDate = msg;
+      }
+    }
   }
   
   // Set location from ZIP (and determine city from ZIP if not already found)
@@ -157,15 +168,11 @@ function extractLeadData(history) {
       leadData.location = leadData.zip;
     }
     
-    // Major cities in service area
     const zipToCityMap = {
-      // Kissimmee area
       '34746': 'Kissimmee', '34741': 'Kissimmee', '34743': 'Kissimmee', '34744': 'Kissimmee',
       '34745': 'Kissimmee', '34747': 'Kissimmee', '34758': 'Davenport', '34759': 'Intercession City',
       '34740': 'Kissimmee', '34742': 'Kissimmee', '34769': 'St. Cloud', '34771': 'St. Cloud',
       '34772': 'St. Cloud', '34773': 'St. Cloud',
-      
-      // Orlando area
       '32801': 'Orlando', '32802': 'Orlando', '32803': 'Orlando', '32804': 'Orlando',
       '32805': 'Orlando', '32806': 'Orlando', '32807': 'Orlando', '32808': 'Orlando',
       '32809': 'Orlando', '32810': 'Orlando', '32811': 'Orlando', '32812': 'Orlando',
@@ -175,12 +182,8 @@ function extractLeadData(history) {
       '32828': 'Orlando', '32829': 'Orlando', '32830': 'Orlando', '32831': 'Orlando',
       '32832': 'Orlando', '32833': 'Orlando', '32834': 'Orlando', '32835': 'Orlando',
       '32836': 'Orlando', '32837': 'Orlando', '32839': 'Orlando',
-      
-      // Winter Park area
       '32789': 'Winter Park', '32790': 'Winter Park', '32792': 'Winter Park',
       '32793': 'Winter Park', '32794': 'Winter Park',
-      
-      // Other cities
       '32703': 'Apopka', '32704': 'Apopka', '32712': 'Apopka',
       '34761': 'Ocoee', '34760': 'Ocoee',
       '34777': 'Winter Garden', '34778': 'Winter Garden', '34787': 'Winter Garden',
@@ -198,10 +201,8 @@ function extractLeadData(history) {
   return leadData;
 }
 
-// IMPROVED: Check if we have complete lead data
-// Now accepts EITHER city OR ZIP (or both)
+// Check if we have complete lead data
 function isLeadComplete(leadData) {
-  // Must have BOTH first and last name
   const hasFullName = leadData.firstName && 
                       leadData.lastName && 
                       leadData.firstName.length >= 2 && 
@@ -209,8 +210,6 @@ function isLeadComplete(leadData) {
   
   const hasPhone = leadData.phone && leadData.phone.length >= 10;
   const hasService = leadData.service && leadData.service.trim().length > 0;
-  
-  // NEW: Accept EITHER city OR ZIP (or both)
   const hasLocation = (leadData.zip && leadData.zip.length === 5) || 
                       (leadData.city && leadData.city.length >= 3);
   
@@ -222,7 +221,8 @@ function isLeadComplete(leadData) {
     hasService,
     hasLocation,
     city: leadData.city,
-    zip: leadData.zip
+    zip: leadData.zip,
+    preferredDate: leadData.preferredDate
   });
   
   return hasFullName && hasPhone && hasService && hasLocation;
@@ -306,44 +306,12 @@ CRITICAL NAME REQUIREMENTS:
 LOCATION REQUIREMENTS:
 - Accept EITHER city name OR ZIP code (or both)
 - Examples: "Orlando", "32801", "Orlando 32801", "I'm in Kissimmee"
-- If they give city, you don't need ZIP (and vice versa)
 
 IMPORTANT:
 - Ask ONE question at a time
 - Reference information they already gave you to show you remember
 - Be conversational and friendly
 - Keep responses SHORT (2-3 sentences maximum)
-- If they give incomplete name, politely ask for the missing part
-
-EXAMPLE CONVERSATION 1 (with ZIP):
-User: "I need plumbing help"
-You: "I'd be happy to help with your plumbing needs! What specific plumbing work do you need assistance with?"
-User: "Fix a leaky faucet in the bathroom"
-You: "Got it - leaky bathroom faucet repair. What city are you in, or what's your ZIP code?"
-User: "32801"
-You: "Perfect, 32801 area. May I have your full name please?"
-User: "john smith"
-You: "Great, thank you John Smith! What's the best phone number to reach you at?"
-User: "407-555-0123"
-You: "Perfect! And when would you like us to come out for the faucet repair?"
-User: "This weekend if possible"
-You: "Excellent! Let me confirm: John Smith at 407-555-0123 in the 32801 area, needs a leaky bathroom faucet repaired, preferably this weekend. We'll have someone contact you shortly to schedule. Thank you for choosing Skillful Hands!"
-
-EXAMPLE CONVERSATION 2 (with city only):
-User: "I need electrical work"
-You: "I'd be happy to help! What electrical work do you need done?"
-User: "Install ceiling fan"
-You: "Got it - ceiling fan installation. What city are you in, or what's your ZIP code?"
-User: "Orlando"
-You: "Perfect, Orlando area. May I have your full name please?"
-User: "mike"
-You: "Thank you Mike! And what's your last name?"
-User: "johnson"
-You: "Great, Mike Johnson! What's the best phone number to reach you?"
-User: "321-555-9999"
-You: "Perfect! When would you like the ceiling fan installed?"
-User: "Next week"
-You: "Excellent! Let me confirm: Mike Johnson at 321-555-9999 in Orlando, needs a ceiling fan installed, preferably next week. We'll contact you shortly to schedule. Thank you!"
 
 SERVICES WE OFFER:
 Plumbing, electrical work, drywall repair, painting, tile installation, carpentry, pressure washing, deck repairs, door/window installation, furniture assembly, general handyman services.
@@ -359,30 +327,26 @@ Remember:
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: messages,
-      temperature: 0.3,
-      max_tokens: 200
-    });
+    model: "gpt-5.2-instant",  // ← ИЗМЕНИЛИ
+    messages: messages,
+    temperature: 0.3,
+    max_tokens: 200
+  });
 
     const assistantMessage = response.choices[0].message.content;
     
-    // Build updated conversation history
     const updatedHistory = [
       ...history,
       { role: "user", content: message },
       { role: "assistant", content: assistantMessage }
     ];
     
-    // Check if we have complete lead data
     const leadData = extractLeadData(updatedHistory);
     
     console.log('📊 Extracted lead data:', leadData);
     console.log('✅ Complete?', isLeadComplete(leadData));
     
-    // If lead is complete and we haven't sent it yet, send to n8n
     if (isLeadComplete(leadData)) {
-      // Check if this is the summary message (contains "confirm" or "contact you")
       if (assistantMessage.toLowerCase().includes('confirm') || 
           assistantMessage.toLowerCase().includes('contact you')) {
         console.log('🚀 Sending complete lead to n8n...');
