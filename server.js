@@ -330,7 +330,7 @@ Remember:
     model: "gpt-5.2",  // ← ИЗМЕНИЛИ
     messages: messages,
     temperature: 0.3,
-    max_tokens: 200
+    max_completion_tokens: 200  // ✅ НОВЫЙ ПАРАМЕТР
   });
 
     const assistantMessage = response.choices[0].message.content;
