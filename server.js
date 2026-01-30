@@ -66,7 +66,7 @@ function extractLeadData(history) {
   const userMessages = history.filter(msg => msg.role === "user").map(msg => msg.content);
   
   // More flexible name pattern (case-insensitive, allows one or two words)
-const namePattern = /\b([A-Za-z]{2,})\s+([A-Za-z]{2,})\b/i;
+  const namePattern = /\b([A-Z][a-z]{1,})\s+([A-Z][a-z]{1,})\b/;
   
   // Phone pattern (various formats)
   const phonePattern = /\b(\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\(\d{3}\)\s?\d{3}[-.\s]?\d{4})\b/;
