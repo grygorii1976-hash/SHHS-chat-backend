@@ -327,7 +327,7 @@ Remember:
     ];
 
     const response = await openai.chat.completions.create({
-    model: "gpt-5-mini",  // ← ИЗМЕНИЛИ
+    model: "gpt-5.2",  // ← ИЗМЕНИЛИ
     messages: messages,
     temperature: 0.3,
     max_tokens: 200
