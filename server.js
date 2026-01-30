@@ -80,7 +80,7 @@ function extractLeadData(history) {
   // Service keywords
   const serviceKeywords = ['plumb', 'electric', 'paint', 'drywall', 'tile', 'carpentr', 
     'pressure', 'deck', 'door', 'window', 'fan', 'faucet', 'toilet', 'repair', 'install', 
-    'fix', 'replace', 'remodel', 'renovation', 'construct', 'build', 'mount', 'hang', 'leak'];
+    'fix', 'replace', 'remodel', 'renovation', 'construct', 'build', 'mount', 'hang', 'leak', 'knob'];
   
   for (const msg of userMessages) {
     // Extract name - IMPROVED: case-insensitive
@@ -120,6 +120,25 @@ function extractLeadData(history) {
       }
     }
     
+    // NEW: Extract city name if not already found
+    if (!leadData.city) {
+      const cityPattern = /\b(Orlando|Kissimmee|Lakeland|Winter Park|Winter Garden|Clermont|St\.? Cloud|Saint Cloud|Apopka|Ocoee|Davenport|Haines City|Poinciana|Intercession City|Celebration|Windermere|Altamonte Springs|Sanford|Lake Mary|Maitland|Casselberry|Longwood|Cocoa|Melbourne|Titusville|Palm Bay|Rockledge)\b/i;
+      const cityMatch = msg.match(cityPattern);
+      if (cityMatch) {
+        const cityName = cityMatch[1];
+        // Proper capitalization
+        leadData.city = cityName.split(' ').map(word => 
+          word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        ).join(' ');
+        
+        if (!leadData.location) {
+          leadData.location = leadData.city;
+        }
+        // Assume in service area if they mention a city we serve
+        leadData.inServiceArea = true;
+      }
+    }
+    
     // Extract service
     if (!leadData.service) {
       const lowerMsg = msg.toLowerCase();
@@ -132,11 +151,13 @@ function extractLeadData(history) {
     }
   }
   
-  // Set location from ZIP
+  // Set location from ZIP (and determine city from ZIP if not already found)
   if (leadData.zip) {
-    leadData.location = leadData.zip;
+    if (!leadData.location) {
+      leadData.location = leadData.zip;
+    }
     
-    // Major cities in service area (same as before)
+    // Major cities in service area
     const zipToCityMap = {
       // Kissimmee area
       '34746': 'Kissimmee', '34741': 'Kissimmee', '34743': 'Kissimmee', '34744': 'Kissimmee',
@@ -159,7 +180,7 @@ function extractLeadData(history) {
       '32789': 'Winter Park', '32790': 'Winter Park', '32792': 'Winter Park',
       '32793': 'Winter Park', '32794': 'Winter Park',
       
-      // Other cities...
+      // Other cities
       '32703': 'Apopka', '32704': 'Apopka', '32712': 'Apopka',
       '34761': 'Ocoee', '34760': 'Ocoee',
       '34777': 'Winter Garden', '34778': 'Winter Garden', '34787': 'Winter Garden',
@@ -169,13 +190,16 @@ function extractLeadData(history) {
       '33844': 'Haines City', '33845': 'Haines City', '33846': 'Haines City'
     };
     
-    leadData.city = zipToCityMap[leadData.zip] || 'Central Florida';
+    if (!leadData.city) {
+      leadData.city = zipToCityMap[leadData.zip] || 'Central Florida';
+    }
   }
   
   return leadData;
 }
 
 // IMPROVED: Check if we have complete lead data
+// Now accepts EITHER city OR ZIP (or both)
 function isLeadComplete(leadData) {
   // Must have BOTH first and last name
   const hasFullName = leadData.firstName && 
@@ -185,7 +209,10 @@ function isLeadComplete(leadData) {
   
   const hasPhone = leadData.phone && leadData.phone.length >= 10;
   const hasService = leadData.service && leadData.service.trim().length > 0;
-  const hasZip = leadData.zip && leadData.zip.length === 5;
+  
+  // NEW: Accept EITHER city OR ZIP (or both)
+  const hasLocation = (leadData.zip && leadData.zip.length === 5) || 
+                      (leadData.city && leadData.city.length >= 3);
   
   console.log('🔍 Checking completeness:', {
     hasFullName,
@@ -193,13 +220,13 @@ function isLeadComplete(leadData) {
     lastName: leadData.lastName,
     hasPhone,
     hasService,
-    hasZip
+    hasLocation,
+    city: leadData.city,
+    zip: leadData.zip
   });
   
-  return hasFullName && hasPhone && hasService && hasZip;
+  return hasFullName && hasPhone && hasService && hasLocation;
 }
-
-
 
 // Send lead to n8n webhook
 async function sendLeadToN8n(leadData, conversationHistory) {
@@ -211,11 +238,11 @@ async function sendLeadToN8n(leadData, conversationHistory) {
       },
       body: JSON.stringify({
         source: 'chat',
-        first_name: leadData.name ? leadData.name.split(' ')[0] : '',
-        last_name: leadData.name ? leadData.name.split(' ').slice(1).join(' ') : '',
+        first_name: leadData.firstName || leadData.name?.split(' ')[0] || '',
+        last_name: leadData.lastName || leadData.name?.split(' ').slice(1).join(' ') || '',
         phone: leadData.phone,
-        city: leadData.city,
-        zip: leadData.zip,
+        city: leadData.city || 'Not specified',
+        zip: leadData.zip || 'Not specified',
         service_description: leadData.service,
         preferred_date: leadData.preferredDate || 'Not specified',
         lead_status: 'New',
@@ -246,9 +273,9 @@ app.post("/chat", async (req, res) => {
     }
 
     const messages = [
-  {
-    role: "system",
-    content: `You are an AI receptionist for Skillful Hands Handyman Services in Central Florida.
+      {
+        role: "system",
+        content: `You are an AI receptionist for Skillful Hands Handyman Services in Central Florida.
 
 CRITICAL MEMORY RULES - YOU MUST FOLLOW THESE:
 1. ALWAYS review the ENTIRE conversation history before each response
@@ -257,13 +284,13 @@ CRITICAL MEMORY RULES - YOU MUST FOLLOW THESE:
    ✓ Service needed? (what type of work)
    ✓ Customer FULL name? (BOTH first AND last name - REQUIRED!)
    ✓ Phone number?
-   ✓ Location? (city and ZIP code)
+   ✓ Location? (city OR ZIP code - at least one REQUIRED)
    ✓ Preferred date/timeframe?
 
 YOUR CONVERSATION FLOW:
 Step 1: Greet warmly (only on first message)
 Step 2: Ask what service they need
-Step 3: Once you know the service, ask for their location (city/ZIP)
+Step 3: Once you know the service, ask for their location. Say: "What city are you in, or what's your ZIP code?" Accept EITHER city name OR ZIP code (or both).
 Step 4: Once you know location, ask for their FULL NAME (first and last name)
 Step 5: Once you know FULL name, ask for their phone number
 Step 6: Once you know phone, ask about preferred date/timeframe
@@ -276,6 +303,11 @@ CRITICAL NAME REQUIREMENTS:
 - Accept names in ANY format: "john smith", "JOHN SMITH", "John Smith" - all are valid
 - DO NOT proceed to phone number until you have BOTH names
 
+LOCATION REQUIREMENTS:
+- Accept EITHER city name OR ZIP code (or both)
+- Examples: "Orlando", "32801", "Orlando 32801", "I'm in Kissimmee"
+- If they give city, you don't need ZIP (and vice versa)
+
 IMPORTANT:
 - Ask ONE question at a time
 - Reference information they already gave you to show you remember
@@ -283,27 +315,35 @@ IMPORTANT:
 - Keep responses SHORT (2-3 sentences maximum)
 - If they give incomplete name, politely ask for the missing part
 
-EXAMPLE CONVERSATION:
+EXAMPLE CONVERSATION 1 (with ZIP):
 User: "I need plumbing help"
 You: "I'd be happy to help with your plumbing needs! What specific plumbing work do you need assistance with?"
-
 User: "Fix a leaky faucet in the bathroom"
-You: "Got it - leaky bathroom faucet repair. What city are you located in, and what's your ZIP code?"
-
-User: "Orlando, 32801"
-You: "Perfect, Orlando 32801. May I have your full name please?"
-
-User: "john"
-You: "Thank you John! And what's your last name?"
-
-User: "smith"
+You: "Got it - leaky bathroom faucet repair. What city are you in, or what's your ZIP code?"
+User: "32801"
+You: "Perfect, 32801 area. May I have your full name please?"
+User: "john smith"
 You: "Great, thank you John Smith! What's the best phone number to reach you at?"
-
 User: "407-555-0123"
 You: "Perfect! And when would you like us to come out for the faucet repair?"
-
 User: "This weekend if possible"
-You: "Excellent! Let me confirm: John Smith at 407-555-0123 in Orlando 32801, needs a leaky bathroom faucet repaired, preferably this weekend. We'll have someone contact you shortly to schedule. Thank you for choosing Skillful Hands!"
+You: "Excellent! Let me confirm: John Smith at 407-555-0123 in the 32801 area, needs a leaky bathroom faucet repaired, preferably this weekend. We'll have someone contact you shortly to schedule. Thank you for choosing Skillful Hands!"
+
+EXAMPLE CONVERSATION 2 (with city only):
+User: "I need electrical work"
+You: "I'd be happy to help! What electrical work do you need done?"
+User: "Install ceiling fan"
+You: "Got it - ceiling fan installation. What city are you in, or what's your ZIP code?"
+User: "Orlando"
+You: "Perfect, Orlando area. May I have your full name please?"
+User: "mike"
+You: "Thank you Mike! And what's your last name?"
+User: "johnson"
+You: "Great, Mike Johnson! What's the best phone number to reach you?"
+User: "321-555-9999"
+You: "Perfect! When would you like the ceiling fan installed?"
+User: "Next week"
+You: "Excellent! Let me confirm: Mike Johnson at 321-555-9999 in Orlando, needs a ceiling fan installed, preferably next week. We'll contact you shortly to schedule. Thank you!"
 
 SERVICES WE OFFER:
 Plumbing, electrical work, drywall repair, painting, tile installation, carpentry, pressure washing, deck repairs, door/window installation, furniture assembly, general handyman services.
@@ -311,11 +351,12 @@ Plumbing, electrical work, drywall repair, painting, tile installation, carpentr
 Remember: 
 - You have the full conversation history - USE IT!
 - NEVER proceed without BOTH first and last name!
-- Accept names in any capitalization format!`
-  },
-  ...history,
-  { role: "user", content: message }
-];
+- Accept names in any capitalization format!
+- Accept EITHER city OR ZIP code for location!`
+      },
+      ...history,
+      { role: "user", content: message }
+    ];
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -359,7 +400,7 @@ Remember:
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
 });
