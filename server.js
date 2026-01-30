@@ -13,87 +13,67 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY 
 });
 
-// Store conversations in memory (for production, use Redis or database)
-const conversations = new Map();
-
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
 app.post("/chat", async (req, res) => {
   try {
-    const { message, sessionId } = req.body;
+    const { message, history = [] } = req.body;
     
     if (!message) {
       return res.status(400).json({ error: "Message required" });
     }
 
-    // Generate session ID if not provided
-    const session = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Get or create conversation history
-    if (!conversations.has(session)) {
-      conversations.set(session, []);
-    }
-    
-    const history = conversations.get(session);
-    
-    // Add user message to history
-    history.push({ role: "user", content: message });
-    
-    // Keep only last 20 messages to avoid token limits
-    if (history.length > 20) {
-      history.splice(0, history.length - 20);
-    }
+    const messages = [
+      {
+        role: "system",
+        content: `You are an AI receptionist for Skillful Hands Handyman Services in Central Florida.
+
+CRITICAL INSTRUCTIONS - READ EVERY TIME:
+1. ALWAYS read the ENTIRE conversation history before responding
+2. NEVER ask for information the customer already provided
+3. Track what you already know:
+   - Service needed? ✓ or ✗
+   - Customer name? ✓ or ✗
+   - Phone number? ✓ or ✗
+   - Location (city/ZIP)? ✓ or ✗
+   - Preferred date? ✓ or ✗
+
+YOUR PROCESS:
+Step 1: Review the conversation - what information do you already have?
+Step 2: Identify what's still missing
+Step 3: Ask for ONE missing piece of information
+Step 4: Once you have ALL 5 pieces, summarize and thank them
+
+EXAMPLE GOOD BEHAVIOR:
+User: "I need plumbing"
+You: "Great! What plumbing work do you need help with?"
+User: "Fix a leaky faucet"
+You: "Perfect! What's your location?" [NOT asking about service again!]
+
+EXAMPLE BAD BEHAVIOR (NEVER DO THIS):
+User: "I need plumbing"
+You: "What service do you need?" [Customer just told you!]
+
+Services: plumbing, electrical, drywall, painting, tile, carpentry, pressure washing, etc.
+
+Keep responses SHORT (1-2 sentences).`
+      },
+      ...history,
+      { role: "user", content: message }
+    ];
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are a helpful AI receptionist for Skillful Hands Handyman Services in Central Florida.
-
-Your job:
-1. Greet the customer warmly (only once at the start)
-2. Ask what service they need
-3. Collect required information:
-   - Name (first and last)
-   - Phone number
-   - City and ZIP code
-   - Brief description of the work needed
-   - Preferred date/timeframe
-
-Important rules:
-- Ask ONE question at a time
-- Remember what the customer already told you
-- Don't repeat questions you already asked
-- Be conversational and friendly
-- Once you have all information, confirm it and thank them
-- If customer asks about services, mention: plumbing, electrical, drywall, painting, tile work, carpentry, pressure washing, etc.
-
-Keep responses short (2-3 sentences max).`
-        },
-        ...history
-      ],
-      temperature: 0.7,
+      messages: messages,
+      temperature: 0.5, // Lower temperature = more consistent
       max_tokens: 150
     });
 
     const assistantMessage = response.choices[0].message.content;
-    
-    // Add assistant response to history
-    history.push({ role: "assistant", content: assistantMessage });
-    
-    // Update conversation
-    conversations.set(session, history);
-    
-    // Clean up old conversations (older than 1 hour)
-    cleanupOldConversations();
 
-    res.json({ 
-      reply: assistantMessage,
-      sessionId: session
-    });
+    res.json({ reply: assistantMessage });
 
   } catch (error) {
     console.error("Error:", error);
@@ -103,19 +83,45 @@ Keep responses short (2-3 sentences max).`
   }
 });
 
-// Cleanup function to prevent memory leaks
-function cleanupOldConversations() {
-  const oneHourAgo = Date.now() - (60 * 60 * 1000);
-  for (const [sessionId, history] of conversations.entries()) {
-    // Extract timestamp from sessionId
-    const timestamp = parseInt(sessionId.split('_')[1]);
-    if (timestamp < oneHourAgo) {
-      conversations.delete(sessionId);
-    }
-  }
-}
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log("Server running on port " + PORT);
 });
+```
+
+---
+
+## 🔑 Ключевые изменения:
+
+1. ✅ **Более директивный промпт** с примерами хорошего/плохого поведения
+2. ✅ **Чек-лист** для AI (✓ или ✗)
+3. ✅ **Temperature = 0.5** (вместо 0.7) — более предсказуемое поведение
+4. ✅ **CRITICAL INSTRUCTIONS** — привлекает внимание модели
+
+---
+
+## 🚀 Обновите backend:
+
+1. VS Code → `server.js` → замените код
+2. Сохраните
+3. GitHub Desktop → Commit → Push
+4. Подождите 2 минуты (Render передеплоит)
+
+---
+
+## 🧪 Финальный тест:
+
+1. Обновите сайт: `Cmd + Shift + R`
+2. Откройте чат
+3. Тестовый сценарий:
+```
+Вы: I need bathroom work
+AI: [спросит детали]
+Вы: Replace toilet
+AI: [спросит локацию]
+Вы: Kissimmee 34746
+AI: [спросит имя, БЕЗ повтора про услугу!]
+Вы: Mike Smith
+AI: [спросит телефон]
+Вы: 407-555-0199
+AI: [суммирует ВСЁ: Mike, 407-555-0199, Kissimmee 34746, toilet replacement]
