@@ -50,10 +50,12 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Helper function to extract lead data from conversation
+// Improved helper function to extract lead data from conversation
 function extractLeadData(history) {
   const leadData = {
     name: null,
+    firstName: null,
+    lastName: null,
     phone: null,
     service: null,
     location: null,
@@ -65,8 +67,9 @@ function extractLeadData(history) {
   
   const userMessages = history.filter(msg => msg.role === "user").map(msg => msg.content);
   
-  // More flexible name pattern (case-insensitive, allows one or two words)
-  const namePattern = /\b([A-Z][a-z]{1,})\s+([A-Z][a-z]{1,})\b/;
+  // IMPROVED: More flexible name pattern (case-insensitive, allows various formats)
+  // Matches: "John Smith", "john smith", "JOHN SMITH", "John-Paul Smith"
+  const namePattern = /\b([A-Za-z][\w'-]{1,})\s+([A-Za-z][\w'-]{1,})\b/i;
   
   // Phone pattern (various formats)
   const phonePattern = /\b(\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\(\d{3}\)\s?\d{3}[-.\s]?\d{4})\b/;
@@ -77,14 +80,26 @@ function extractLeadData(history) {
   // Service keywords
   const serviceKeywords = ['plumb', 'electric', 'paint', 'drywall', 'tile', 'carpentr', 
     'pressure', 'deck', 'door', 'window', 'fan', 'faucet', 'toilet', 'repair', 'install', 
-    'fix', 'replace', 'remodel', 'renovation', 'construct', 'build', 'mount', 'hang'];
+    'fix', 'replace', 'remodel', 'renovation', 'construct', 'build', 'mount', 'hang', 'leak'];
   
   for (const msg of userMessages) {
-    // Extract name
+    // Extract name - IMPROVED: case-insensitive
     if (!leadData.name) {
       const nameMatch = msg.match(namePattern);
       if (nameMatch) {
-        leadData.name = `${nameMatch[1]} ${nameMatch[2]}`;
+        // Only accept if it's NOT a service-related phrase
+        const msgLower = msg.toLowerCase();
+        const isServicePhrase = serviceKeywords.some(keyword => msgLower.includes(keyword));
+        
+        if (!isServicePhrase) {
+          // Capitalize properly: "john smith" → "John Smith"
+          const firstName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
+          const lastName = nameMatch[2].charAt(0).toUpperCase() + nameMatch[2].slice(1).toLowerCase();
+          
+          leadData.firstName = firstName;
+          leadData.lastName = lastName;
+          leadData.name = `${firstName} ${lastName}`;
+        }
       }
     }
     
@@ -121,7 +136,7 @@ function extractLeadData(history) {
   if (leadData.zip) {
     leadData.location = leadData.zip;
     
-    // Major cities in service area
+    // Major cities in service area (same as before)
     const zipToCityMap = {
       // Kissimmee area
       '34746': 'Kissimmee', '34741': 'Kissimmee', '34743': 'Kissimmee', '34744': 'Kissimmee',
@@ -144,27 +159,14 @@ function extractLeadData(history) {
       '32789': 'Winter Park', '32790': 'Winter Park', '32792': 'Winter Park',
       '32793': 'Winter Park', '32794': 'Winter Park',
       
-      // Apopka area
+      // Other cities...
       '32703': 'Apopka', '32704': 'Apopka', '32712': 'Apopka',
-      
-      // Ocoee area
       '34761': 'Ocoee', '34760': 'Ocoee',
-      
-      // Winter Garden area
       '34777': 'Winter Garden', '34778': 'Winter Garden', '34787': 'Winter Garden',
-      
-      // Clermont area
       '34711': 'Clermont', '34714': 'Clermont', '34715': 'Clermont',
-      
-      // Lakeland area
       '33801': 'Lakeland', '33803': 'Lakeland', '33805': 'Lakeland', '33809': 'Lakeland',
       '33810': 'Lakeland', '33811': 'Lakeland', '33813': 'Lakeland',
-      
-      // Haines City area
-      '33844': 'Haines City', '33845': 'Haines City', '33846': 'Haines City',
-      
-      // Poinciana area
-      '34758': 'Poinciana', '34759': 'Poinciana'
+      '33844': 'Haines City', '33845': 'Haines City', '33846': 'Haines City'
     };
     
     leadData.city = zipToCityMap[leadData.zip] || 'Central Florida';
@@ -173,22 +175,30 @@ function extractLeadData(history) {
   return leadData;
 }
 
-// Check if we have complete lead data
+// IMPROVED: Check if we have complete lead data
 function isLeadComplete(leadData) {
-  const hasName = leadData.name && leadData.name.trim().length > 0;
+  // Must have BOTH first and last name
+  const hasFullName = leadData.firstName && 
+                      leadData.lastName && 
+                      leadData.firstName.length >= 2 && 
+                      leadData.lastName.length >= 2;
+  
   const hasPhone = leadData.phone && leadData.phone.length >= 10;
   const hasService = leadData.service && leadData.service.trim().length > 0;
   const hasZip = leadData.zip && leadData.zip.length === 5;
   
   console.log('🔍 Checking completeness:', {
-    hasName,
+    hasFullName,
+    firstName: leadData.firstName,
+    lastName: leadData.lastName,
     hasPhone,
     hasService,
     hasZip
   });
   
-  return hasName && hasPhone && hasService && hasZip;
+  return hasFullName && hasPhone && hasService && hasZip;
 }
+
 
 
 // Send lead to n8n webhook
@@ -236,16 +246,16 @@ app.post("/chat", async (req, res) => {
     }
 
     const messages = [
-      {
-        role: "system",
-        content: `You are an AI receptionist for Skillful Hands Handyman Services in Central Florida.
+  {
+    role: "system",
+    content: `You are an AI receptionist for Skillful Hands Handyman Services in Central Florida.
 
 CRITICAL MEMORY RULES - YOU MUST FOLLOW THESE:
 1. ALWAYS review the ENTIRE conversation history before each response
 2. NEVER ask for information the customer has already provided
 3. Keep a mental checklist of what you know:
    ✓ Service needed? (what type of work)
-   ✓ Customer name? (first and last)
+   ✓ Customer FULL name? (BOTH first AND last name - REQUIRED!)
    ✓ Phone number?
    ✓ Location? (city and ZIP code)
    ✓ Preferred date/timeframe?
@@ -254,39 +264,58 @@ YOUR CONVERSATION FLOW:
 Step 1: Greet warmly (only on first message)
 Step 2: Ask what service they need
 Step 3: Once you know the service, ask for their location (city/ZIP)
-Step 4: Once you know location, ask for their name
-Step 5: Once you know name, ask for their phone number
+Step 4: Once you know location, ask for their FULL NAME (first and last name)
+Step 5: Once you know FULL name, ask for their phone number
 Step 6: Once you know phone, ask about preferred date/timeframe
 Step 7: When you have ALL information, summarize it back and thank them
+
+CRITICAL NAME REQUIREMENTS:
+- You MUST collect BOTH first name AND last name
+- If customer gives only first name (e.g. "John"), respond: "Thank you John! And what's your last name?"
+- If customer gives only last name, ask for first name
+- Accept names in ANY format: "john smith", "JOHN SMITH", "John Smith" - all are valid
+- DO NOT proceed to phone number until you have BOTH names
 
 IMPORTANT:
 - Ask ONE question at a time
 - Reference information they already gave you to show you remember
 - Be conversational and friendly
 - Keep responses SHORT (2-3 sentences maximum)
+- If they give incomplete name, politely ask for the missing part
 
-EXAMPLE OF GOOD CONVERSATION:
+EXAMPLE CONVERSATION:
 User: "I need plumbing help"
-Assistant: "I'd be happy to help with your plumbing needs! What specific plumbing work do you need assistance with?"
+You: "I'd be happy to help with your plumbing needs! What specific plumbing work do you need assistance with?"
+
 User: "Fix a leaky faucet in the bathroom"
-Assistant: "Got it - leaky bathroom faucet repair. What city are you located in, and what's your ZIP code?"
+You: "Got it - leaky bathroom faucet repair. What city are you located in, and what's your ZIP code?"
+
 User: "Orlando, 32801"
-Assistant: "Perfect, Orlando 32801. May I have your name please?"
-User: "John Smith"
-Assistant: "Thank you, John! What's the best phone number to reach you at?"
+You: "Perfect, Orlando 32801. May I have your full name please?"
+
+User: "john"
+You: "Thank you John! And what's your last name?"
+
+User: "smith"
+You: "Great, thank you John Smith! What's the best phone number to reach you at?"
+
 User: "407-555-0123"
-Assistant: "Great! And when would you like us to come out for the faucet repair?"
+You: "Perfect! And when would you like us to come out for the faucet repair?"
+
 User: "This weekend if possible"
-Assistant: "Perfect! Let me confirm: John Smith at 407-555-0123 in Orlando 32801, needs a leaky bathroom faucet repaired, preferably this weekend. We'll have someone contact you shortly to schedule. Thank you for choosing Skillful Hands!"
+You: "Excellent! Let me confirm: John Smith at 407-555-0123 in Orlando 32801, needs a leaky bathroom faucet repaired, preferably this weekend. We'll have someone contact you shortly to schedule. Thank you for choosing Skillful Hands!"
 
 SERVICES WE OFFER:
 Plumbing, electrical work, drywall repair, painting, tile installation, carpentry, pressure washing, deck repairs, door/window installation, furniture assembly, general handyman services.
 
-Remember: You have the full conversation history - USE IT!`
-      },
-      ...history,
-      { role: "user", content: message }
-    ];
+Remember: 
+- You have the full conversation history - USE IT!
+- NEVER proceed without BOTH first and last name!
+- Accept names in any capitalization format!`
+  },
+  ...history,
+  { role: "user", content: message }
+];
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
