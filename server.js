@@ -16,6 +16,36 @@ const openai = new OpenAI({
 // n8n webhook URL for chat leads
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || "https://skillfulhands.app.n8n.cloud/webhook/chat-lead";
 
+// Service area ZIP codes - Central Florida
+const SERVICE_AREA_ZIPS = new Set([
+  '34746', '33848', '34758', '34742', '34745', '34741', '33858', '34743', '34744', '33896',
+  '34769', '32837', '34747', '34770', '32821', '34759', '33836', '33837', '32830', '32824',
+  '32836', '34772', '33845', '32899', '33844', '32827', '32819', '32809', '33897', '32839',
+  '33851', '34786', '32812', '32811', '32806', '33838', '32832', '32835', '33850', '32805',
+  '34787', '32822', '33881', '34771', '33877', '32896', '32853', '32854', '32855', '32856',
+  '32857', '32858', '32859', '32860', '32861', '32862', '32867', '32868', '32869', '32872',
+  '32877', '32878', '32885', '32886', '32887', '32891', '32897', '32802', '34734', '32801',
+  '32829', '33888', '33868', '32803', '33885', '32807', '33884', '33882', '33883', '34761',
+  '32808', '32804', '32814', '33898', '32825', '34777', '34778', '34714', '32818', '34760',
+  '32831', '34740', '33853', '33856', '32789', '34773', '32790', '32793', '33823', '32828',
+  '32710', '32733', '32794', '33839', '32810', '34711', '33854', '33880', '32792', '32817',
+  '32799', '32751', '33859', '34756', '32834', '32833', '32826', '32816', '33827', '32730',
+  '34712', '34713', '32714', '32715', '32716', '34755', '32703', '32701', '32707', '33820',
+  '32704', '34729', '32718', '32719', '33855', '32820', '33801', '32768', '34715', '33809',
+  '32708', '33805', '32709', '32752', '32791', '33812', '33840', '33846', '32750', '34736',
+  '32762', '33831', '32765', '34739', '33803', '33830', '32712', '32779', '33802', '33806',
+  '33804', '32798', '33813', '32757', '33843', '33810', '33807', '33867', '34753', '32746',
+  '32766', '32745', '34705', '32795', '33815', '32773', '33849', '32777', '34737', '33847',
+  '33811', '32926', '32772', '32776', '33841', '32756', '32732', '32778', '32747', '32927',
+  '32955', '34797', '32780', '32771', '33540', '33863', '32922', '33564', '32904', '33514',
+  '33524', '32959', '32923', '32924', '33565', '33826', '32956', '33860', '33542', '32727',
+  '32713', '32940', '33539', '33563', '32753', '32934', '32754', '32726', '34748', '34762',
+  '33825', '33597', '32725', '32954', '32781', '32783', '33526', '32736', '32728', '33537',
+  '33567', '33541', '32739', '33566', '34749', '34789', '33835', '32952', '33593', '32953',
+  '32908', '32796', '33525', '32738', '32907', '32763', '32784', '33574', '32735', '32764',
+  '34788', '32935', '32774', '33523', '33587', '32936', '32919'
+]);
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
@@ -29,10 +59,10 @@ function extractLeadData(history) {
     location: null,
     city: null,
     zip: null,
-    preferredDate: null
+    preferredDate: null,
+    inServiceArea: false
   };
   
-  // Simple extraction - look for patterns in user messages
   const userMessages = history.filter(msg => msg.role === "user").map(msg => msg.content);
   
   // Name pattern (firstname lastname)
@@ -45,7 +75,9 @@ function extractLeadData(history) {
   const zipPattern = /\b(\d{5})\b/;
   
   // Service keywords
-  const serviceKeywords = ['plumb', 'electric', 'paint', 'drywall', 'tile', 'carpentr', 'pressure', 'deck', 'door', 'window', 'fan', 'faucet', 'toilet', 'repair', 'install', 'fix', 'replace'];
+  const serviceKeywords = ['plumb', 'electric', 'paint', 'drywall', 'tile', 'carpentr', 
+    'pressure', 'deck', 'door', 'window', 'fan', 'faucet', 'toilet', 'repair', 'install', 
+    'fix', 'replace', 'remodel', 'renovation', 'construct', 'build', 'mount', 'hang'];
   
   for (const msg of userMessages) {
     // Extract name
@@ -69,6 +101,7 @@ function extractLeadData(history) {
       const zipMatch = msg.match(zipPattern);
       if (zipMatch) {
         leadData.zip = zipMatch[1];
+        leadData.inServiceArea = SERVICE_AREA_ZIPS.has(zipMatch[1]);
       }
     }
     
@@ -84,29 +117,54 @@ function extractLeadData(history) {
     }
   }
   
-  // Set location from ZIP if available
+  // Set location from ZIP
   if (leadData.zip) {
     leadData.location = leadData.zip;
     
-    // Common Central Florida cities by ZIP
+    // Major cities in service area
     const zipToCityMap = {
-      '34746': 'Kissimmee',
-      '34747': 'Kissimmee',
-      '32801': 'Orlando',
-      '32803': 'Orlando',
-      '32804': 'Orlando',
-      '32805': 'Orlando',
-      '32806': 'Orlando',
-      '32807': 'Orlando',
-      '32808': 'Orlando',
-      '32809': 'Orlando',
-      '32810': 'Orlando',
-      '32811': 'Orlando',
-      '32812': 'Orlando',
-      '34741': 'Kissimmee',
-      '34743': 'Kissimmee',
-      '34744': 'Kissimmee',
-      '34758': 'Davenport'
+      // Kissimmee area
+      '34746': 'Kissimmee', '34741': 'Kissimmee', '34743': 'Kissimmee', '34744': 'Kissimmee',
+      '34745': 'Kissimmee', '34747': 'Kissimmee', '34758': 'Davenport', '34759': 'Intercession City',
+      '34740': 'Kissimmee', '34742': 'Kissimmee', '34769': 'St. Cloud', '34771': 'St. Cloud',
+      '34772': 'St. Cloud', '34773': 'St. Cloud',
+      
+      // Orlando area
+      '32801': 'Orlando', '32802': 'Orlando', '32803': 'Orlando', '32804': 'Orlando',
+      '32805': 'Orlando', '32806': 'Orlando', '32807': 'Orlando', '32808': 'Orlando',
+      '32809': 'Orlando', '32810': 'Orlando', '32811': 'Orlando', '32812': 'Orlando',
+      '32814': 'Orlando', '32816': 'Orlando', '32817': 'Orlando', '32818': 'Orlando',
+      '32819': 'Orlando', '32820': 'Orlando', '32821': 'Orlando', '32822': 'Orlando',
+      '32824': 'Orlando', '32825': 'Orlando', '32826': 'Orlando', '32827': 'Orlando',
+      '32828': 'Orlando', '32829': 'Orlando', '32830': 'Orlando', '32831': 'Orlando',
+      '32832': 'Orlando', '32833': 'Orlando', '32834': 'Orlando', '32835': 'Orlando',
+      '32836': 'Orlando', '32837': 'Orlando', '32839': 'Orlando',
+      
+      // Winter Park area
+      '32789': 'Winter Park', '32790': 'Winter Park', '32792': 'Winter Park',
+      '32793': 'Winter Park', '32794': 'Winter Park',
+      
+      // Apopka area
+      '32703': 'Apopka', '32704': 'Apopka', '32712': 'Apopka',
+      
+      // Ocoee area
+      '34761': 'Ocoee', '34760': 'Ocoee',
+      
+      // Winter Garden area
+      '34777': 'Winter Garden', '34778': 'Winter Garden', '34787': 'Winter Garden',
+      
+      // Clermont area
+      '34711': 'Clermont', '34714': 'Clermont', '34715': 'Clermont',
+      
+      // Lakeland area
+      '33801': 'Lakeland', '33803': 'Lakeland', '33805': 'Lakeland', '33809': 'Lakeland',
+      '33810': 'Lakeland', '33811': 'Lakeland', '33813': 'Lakeland',
+      
+      // Haines City area
+      '33844': 'Haines City', '33845': 'Haines City', '33846': 'Haines City',
+      
+      // Poinciana area
+      '34758': 'Poinciana', '34759': 'Poinciana'
     };
     
     leadData.city = zipToCityMap[leadData.zip] || 'Central Florida';
@@ -138,6 +196,7 @@ async function sendLeadToN8n(leadData, conversationHistory) {
         service_description: leadData.service,
         preferred_date: leadData.preferredDate || 'Not specified',
         lead_status: 'New',
+        in_service_area: leadData.inServiceArea,
         conversation: conversationHistory
       })
     });
@@ -262,94 +321,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
 });
-```
-
----
-
-## 🔧 ШАГ 2: Добавляем переменную окружения в Render
-
-1. Откройте https://render.com
-2. Ваш сервис **shhs-chat-backend**
-3. **Environment** (слева в меню)
-4. **Add Environment Variable**
-5. Добавьте:
-```
-   Key: N8N_WEBHOOK_URL
-   Value: https://skillfulhands.app.n8n.cloud/webhook/chat-lead
-```
-6. **Save Changes**
-
-Render автоматически передеплоит сервис (2-3 минуты).
-
----
-
-## 🔧 ШАГ 3: Создаём новый webhook в n8n
-
-1. Откройте https://skillfulhands.app.n8n.cloud
-2. Создайте **New Workflow** или откройте существующий
-3. Назовите: "Chat Lead to HubSpot"
-
-### Добавьте ноды:
-
-**1. Webhook (Trigger)**
-- Path: `/chat-lead`
-- Method: POST
-
-**2. Set Node (форматирование данных)**
-- Name: Format Lead Data
-- Values:
-```
-  first_name = {{ $json.first_name }}
-  last_name = {{ $json.last_name }}
-  phone = {{ $json.phone }}
-  city = {{ $json.city }}
-  zip = {{ $json.zip }}
-  service = {{ $json.service_description }}
-  source = chat
-  lead_status = New
-```
-
-**3. HubSpot Node (Create/Update Contact)**
-- Operation: Create or Update Contact
-- Email: (оставьте пустым или используйте placeholder)
-- Properties:
-  - First Name: `{{ $json.first_name }}`
-  - Last Name: `{{ $json.last_name }}`
-  - Phone: `{{ $json.phone }}`
-  - City: `{{ $json.city }}`
-  - ZIP: `{{ $json.zip }}`
-  - Service Description: `{{ $json.service }}`
-  - Lead Source: "Chat Widget"
-
-**4. Telegram Node (Send Message)**
-- Chat ID: ваш Telegram ID
-- Message:
-```
-  🆕 Новый лид из ЧАТА!
-  
-  👤 {{ $json.first_name }} {{ $json.last_name }}
-  📞 {{ $json.phone }}
-  📍 {{ $json.city }}, {{ $json.zip }}
-  🔧 {{ $json.service }}
-  
-  Источник: AI Chat Widget
-```
-
-**5. Активируйте workflow!**
-
----
-
-## 🧪 ШАГ 4: Тестирование
-
-Подождите пока Render передеплоится (2-3 минуты после добавления переменной).
-
-Затем протестируйте **полный цикл**:
-
-1. Откройте чат на сайте
-2. Пройдите весь диалог до конца:
-```
-   - Услуга
-   - ZIP
-   - Имя
-   - Телефон
-   - Дата
