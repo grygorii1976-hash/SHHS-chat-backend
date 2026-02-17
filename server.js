@@ -87,20 +87,34 @@ function extractLeadData(history) {
     'next', 'this'];
   
   for (const msg of userMessages) {
-    // Extract name - IMPROVED: case-insensitive
+    // Extract name - IMPROVED: also check service messages for names
     if (!leadData.name) {
-      const nameMatch = msg.match(namePattern);
-      if (nameMatch) {
-        const msgLower = msg.toLowerCase();
-        const isServicePhrase = serviceKeywords.some(keyword => msgLower.includes(keyword));
+      const msgLower = msg.toLowerCase();
+      const isServicePhrase = serviceKeywords.some(keyword => msgLower.includes(keyword));
+      
+      if (isServicePhrase) {
+        // Try to find name pattern like "Johny Smith in" or "Johny Smith," in service messages
+        const nameInServicePattern = /\b([A-Z][a-z]{1,})\s+([A-Z][a-z]{1,})\b(?=\s+(?:in|from|at|,|\.))/;
+        const nameMatch = msg.match(nameInServicePattern);
+        if (nameMatch) {
+          leadData.firstName = nameMatch[1];
+          leadData.lastName = nameMatch[2];
+          leadData.name = `${nameMatch[1]} ${nameMatch[2]}`;
+        }
+      } else {
+        // Non-service message - use original logic but exclude common non-name phrases
+        const skipPhrases = ['will provide', 'no thanks', 'sounds good', 'looks good', 'not sure'];
+        const isSkipPhrase = skipPhrases.some(phrase => msgLower.includes(phrase));
         
-        if (!isServicePhrase) {
-          const firstName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
-          const lastName = nameMatch[2].charAt(0).toUpperCase() + nameMatch[2].slice(1).toLowerCase();
-          
-          leadData.firstName = firstName;
-          leadData.lastName = lastName;
-          leadData.name = `${firstName} ${lastName}`;
+        if (!isSkipPhrase) {
+          const nameMatch = msg.match(namePattern);
+          if (nameMatch) {
+            const firstName = nameMatch[1].charAt(0).toUpperCase() + nameMatch[1].slice(1).toLowerCase();
+            const lastName = nameMatch[2].charAt(0).toUpperCase() + nameMatch[2].slice(1).toLowerCase();
+            leadData.firstName = firstName;
+            leadData.lastName = lastName;
+            leadData.name = `${firstName} ${lastName}`;
+          }
         }
       }
     }
