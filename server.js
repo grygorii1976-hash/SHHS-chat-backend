@@ -321,6 +321,34 @@ function normalizeDate(dateStr) {
   return `${mm}/${dd}/${yy}${timePart}`;
 }
 
+// Track sent leads to prevent duplicates (in-memory, resets on restart)
+const sentLeads = new Set();
+
+// Check if this is the final summary message from assistant
+function isFinalSummary(assistantMessage, leadData) {
+  const msg = assistantMessage.toLowerCase();
+  
+  // The final message should contain the customer's phone number (as confirmation/summary)
+  const hasPhone = leadData.phone && msg.includes(leadData.phone.slice(-4));
+  
+  // OR the final message contains closing phrases
+  const closingPhrases = [
+    'reach out', 'contact you', 'will be in touch', 'get back to you',
+    'call you', 'confirm the appointment', 'confirm your appointment',
+    'we\'ll be', 'someone will', 'our team will', 'shortly',
+    'thank you for choosing', 'thanks for choosing',
+    'here\'s what i have', 'here is what i have', 'to summarize',
+    'to confirm', 'just to recap'
+  ];
+  
+  const hasClosingPhrase = closingPhrases.some(phrase => msg.includes(phrase));
+  
+  // Must have EITHER phone in summary OR a closing phrase
+  // AND the message should be long enough to be a summary (not a quick question)
+  const isLongEnough = assistantMessage.length > 100;
+  
+  return (hasPhone || hasClosingPhrase) && isLongEnough;
+}
 
 // Send lead to n8n webhook
 async function sendLeadToN8n(leadData, conversationHistory) {
@@ -428,11 +456,11 @@ Remember:
     ];
 
     const response = await openai.chat.completions.create({
-    model: "gpt-5.2",  // ← ИЗМЕНИЛИ
-    messages: messages,
-    temperature: 0.3,
-    max_completion_tokens: 200  // ✅ НОВЫЙ ПАРАМЕТР
-  });
+      model: "gpt-5.2",
+      messages: messages,
+      temperature: 0.3,
+      max_completion_tokens: 200
+    });
 
     const assistantMessage = response.choices[0].message.content;
     
@@ -447,23 +475,29 @@ Remember:
     console.log('📊 Extracted lead data:', leadData);
     console.log('✅ Complete?', isLeadComplete(leadData));
     
+    // Send lead only once: when complete + final summary + not already sent
     if (isLeadComplete(leadData)) {
-  // Check if lead was already sent in a previous message
-  const previousAssistantMessages = history.filter(msg => msg.role === 'assistant').map(msg => msg.content.toLowerCase());
-  const alreadySent = previousAssistantMessages.some(msg => 
-    msg.includes('reach out') || msg.includes('contact you shortly') || msg.includes('will be in touch')
-  );
-  
-  // Only send on the FINAL confirmation (contains summary + closing phrase)
-  const isFinalConfirmation = assistantMessage.toLowerCase().includes('reach out') || 
-                               assistantMessage.toLowerCase().includes('contact you shortly') ||
-                               assistantMessage.toLowerCase().includes('will be in touch');
-  
-  if (isFinalConfirmation && !alreadySent) {
-    console.log('🚀 Sending complete lead to n8n...');
-    await sendLeadToN8n(leadData, updatedHistory);
-  }
-}
+      const leadKey = `${leadData.phone}-${leadData.firstName}-${leadData.lastName}`;
+      const alreadySent = sentLeads.has(leadKey);
+      const finalSummary = isFinalSummary(assistantMessage, leadData);
+      
+      console.log('🔎 Send check:', { finalSummary, alreadySent, leadKey });
+      console.log('🔎 Assistant msg length:', assistantMessage.length);
+      console.log('🔎 Assistant msg:', assistantMessage.substring(0, 200));
+      
+      if (finalSummary && !alreadySent) {
+        console.log('🚀 Sending complete lead to n8n...');
+        const sent = await sendLeadToN8n(leadData, updatedHistory);
+        if (sent) {
+          sentLeads.add(leadKey);
+          console.log('✅ Lead marked as sent:', leadKey);
+        }
+      } else if (alreadySent) {
+        console.log('⏭️ Skipped: lead already sent for', leadKey);
+      } else {
+        console.log('⏭️ Skipped: not final summary yet');
+      }
+    }
 
     res.json({ reply: assistantMessage });
 
