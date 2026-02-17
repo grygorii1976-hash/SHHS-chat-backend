@@ -191,6 +191,7 @@ function extractLeadData(history) {
         }
       }
     }
+  }
   
   // Set location from ZIP (and determine city from ZIP if not already found)
   if (leadData.zip) {
