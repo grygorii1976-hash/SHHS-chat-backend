@@ -164,17 +164,33 @@ function extractLeadData(history) {
       }
     }
     
-    // NEW: Extract preferred date
+    // Extract preferred date
     if (!leadData.preferredDate) {
       const lowerMsg = msg.toLowerCase();
-      const hasDateKeyword = dateKeywords.some(keyword => lowerMsg.includes(keyword));
       
-      // Only extract if message is short (likely a date response) and contains date keywords
-      if (hasDateKeyword && msg.length < 50) {
-        leadData.preferredDate = msg;
+      // Try to extract date from patterns like "Preferred time: tomorrow at 10:00 AM"
+      const datePatterns = [
+        /preferred\s*(?:time|date)[:\s]+(.+?)(?:\.|$)/i,
+        /schedule[d]?\s*(?:for|at|on)[:\s]+(.+?)(?:\.|$)/i,
+        /(?:come|visit|appointment)\s*(?:on|at)[:\s]+(.+?)(?:\.|$)/i
+      ];
+      
+      for (const pattern of datePatterns) {
+        const match = msg.match(pattern);
+        if (match) {
+          leadData.preferredDate = match[1].trim();
+          break;
+        }
+      }
+      
+      // Fallback: short message with date keywords
+      if (!leadData.preferredDate) {
+        const hasDateKeyword = dateKeywords.some(keyword => lowerMsg.includes(keyword));
+        if (hasDateKeyword && msg.length < 80) {
+          leadData.preferredDate = msg;
+        }
       }
     }
-  }
   
   // Set location from ZIP (and determine city from ZIP if not already found)
   if (leadData.zip) {
