@@ -259,6 +259,69 @@ function isLeadComplete(leadData) {
   return hasFullName && hasPhone && hasService && hasLocation;
 }
 
+// Convert relative dates to MM/DD/YY format
+function normalizeDate(dateStr) {
+  if (!dateStr) return 'Not specified';
+  
+  const now = new Date();
+  const lower = dateStr.toLowerCase().trim();
+  let target = null;
+  
+  // Already in MM/DD/YY format?
+  const fmtMatch = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (fmtMatch) {
+    // Extract time if present
+    const timeMatch = dateStr.match(/(\d{1,2}):(\d{2})/);
+    const timePart = timeMatch ? ` ${timeMatch[0]}` : '';
+    return `${fmtMatch[0]}${timePart}`;
+  }
+  
+  const dayMap = { 'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3, 
+                   'thursday': 4, 'friday': 5, 'saturday': 6 };
+  
+  if (lower.includes('today')) {
+    target = new Date(now);
+  } else if (lower.includes('tomorrow')) {
+    target = new Date(now);
+    target.setDate(target.getDate() + 1);
+  } else if (lower.includes('asap') || lower.includes('soon')) {
+    return 'ASAP';
+  } else {
+    // Check for day names
+    for (const [day, num] of Object.entries(dayMap)) {
+      if (lower.includes(day)) {
+        target = new Date(now);
+        let diff = num - now.getDay();
+        if (diff <= 0) diff += 7;
+        if (lower.includes('next')) diff += 7;
+        target.setDate(target.getDate() + diff);
+        break;
+      }
+    }
+  }
+  
+  if (!target) return dateStr; // Return as-is if can't parse
+  
+  const mm = String(target.getMonth() + 1).padStart(2, '0');
+  const dd = String(target.getDate()).padStart(2, '0');
+  const yy = String(target.getFullYear()).slice(-2);
+  
+  // Extract time if present
+  const timeMatch = dateStr.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  let timePart = '';
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1]);
+    const minutes = timeMatch[2];
+    const ampm = timeMatch[3]?.toLowerCase();
+    if (ampm === 'pm' && hours < 12) hours += 12;
+    if (ampm === 'am' && hours === 12) hours = 0;
+    timePart = ` ${String(hours).padStart(2, '0')}:${minutes}`;
+  }
+  
+  return `${mm}/${dd}/${yy}${timePart}`;
+}
+
+
 // Send lead to n8n webhook
 async function sendLeadToN8n(leadData, conversationHistory) {
   try {
@@ -275,7 +338,7 @@ async function sendLeadToN8n(leadData, conversationHistory) {
         city: leadData.city || 'Not specified',
         zip: leadData.zip || 'Not specified',
         service_description: leadData.service,
-        preferred_date: leadData.preferredDate || 'Not specified',
+        preferred_date: normalizeDate(leadData.preferredDate),
         lead_status: 'New',
         in_service_area: leadData.inServiceArea,
         conversation: conversationHistory
@@ -326,6 +389,13 @@ Step 4: Once you know location, ask for their FULL NAME (first and last name)
 Step 5: Once you know FULL name, ask for their phone number
 Step 6: Once you know phone, ask about preferred date/timeframe
 Step 7: When you have ALL information, summarize it back and thank them
+
+DATE FORMAT RULES:
+- ALWAYS convert dates to MM/DD/YY format (e.g., 02/18/26, not "tomorrow" or "next Monday")
+- ALWAYS convert times to HH:MM 24-hour format (e.g., 10:00, 14:30)
+- Use today's date to calculate: "tomorrow" → actual date, "next Monday" → actual date
+- In your summary, write dates like: "Preferred time: 02/18/26 at 10:00"
+- NEVER use relative words like "tomorrow", "next week", "this Saturday" in your summary
 
 CRITICAL NAME REQUIREMENTS:
 - You MUST collect BOTH first name AND last name
