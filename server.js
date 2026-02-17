@@ -448,12 +448,22 @@ Remember:
     console.log('✅ Complete?', isLeadComplete(leadData));
     
     if (isLeadComplete(leadData)) {
-      if (assistantMessage.toLowerCase().includes('confirm') || 
-          assistantMessage.toLowerCase().includes('contact you')) {
-        console.log('🚀 Sending complete lead to n8n...');
-        await sendLeadToN8n(leadData, updatedHistory);
-      }
-    }
+  // Check if lead was already sent in a previous message
+  const previousAssistantMessages = history.filter(msg => msg.role === 'assistant').map(msg => msg.content.toLowerCase());
+  const alreadySent = previousAssistantMessages.some(msg => 
+    msg.includes('reach out') || msg.includes('contact you shortly') || msg.includes('will be in touch')
+  );
+  
+  // Only send on the FINAL confirmation (contains summary + closing phrase)
+  const isFinalConfirmation = assistantMessage.toLowerCase().includes('reach out') || 
+                               assistantMessage.toLowerCase().includes('contact you shortly') ||
+                               assistantMessage.toLowerCase().includes('will be in touch');
+  
+  if (isFinalConfirmation && !alreadySent) {
+    console.log('🚀 Sending complete lead to n8n...');
+    await sendLeadToN8n(leadData, updatedHistory);
+  }
+}
 
     res.json({ reply: assistantMessage });
 
